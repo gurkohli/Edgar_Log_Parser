@@ -1,0 +1,24 @@
+{
+  "name": "edgar_log_parse",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "csv": "^5.1.1",
+    "extract-zip": "^1.6.7",
+    "fast-xml-parser": "^3.12.16",
+    "html-entities": "^1.2.1",
+    "is-html": "^1.1.0",
+    "lodash": "^4.17.11",
+    "node-fetch": "^2.3.0",
+    "promise-throttle": "^1.0.0",
+    "striptags": "^3.1.1",
+    "yauzl": "^2.10.0"
+  },
+  "dependencies": {}
+}
