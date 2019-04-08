@@ -41,6 +41,7 @@ const SEC_CACHE_PATH = path.resolve(path.join(DATA_PATH), 'secCache.json');
 const IP_CACHE_PATH = path.resolve(path.join(DATA_PATH), 'ipCache.json');
 const SEC_CACHE_BAK_PATH = path.resolve(path.join(DATA_PATH), 'secCache_bak.json');
 const IP_CACHE_BAK_PATH = path.resolve(path.join(DATA_PATH), 'ipCache_bak.json');
+const LAST_LOG_PATH = path.resolve(path.join(DATA_PATH), 'lastLog.txt');
 
 const RAW_COLUMN_NAMES =
 	['ip', 'accession', 'cik'];
@@ -62,17 +63,9 @@ let ipCache = new Map();
 let secCache = new Map();
 let ipCacheChanged = false;
 let secCacheChanged = false;
+let lastLog = 0;
+let saveProgress = () => {};
 
-// if (fs.existsSync(GLOBAL_IP_ACCESSION_PATH)) {
-// 	let map;
-// 	try {
-// 		map = fs.readFileSync(GLOBAL_IP_ACCESSION_PATH, 'utf-8');
-// 		map = JSON.parse(map);
-// 	} catch (e) {
-// 		map = undefined;
-// 	}
-// 	globalIpAccessionMap = new Set(map);
-// }
 if (fs.existsSync(SEC_CACHE_PATH)) {
 	let map;
 	try {
@@ -94,6 +87,10 @@ if (fs.existsSync(IP_CACHE_PATH)) {
 	}
 	ipCache = new Map(map);
 	fs.renameSync(IP_CACHE_PATH, IP_CACHE_BAK_PATH);
+}
+if (fs.existsSync(LAST_LOG_PATH)) {
+	let lastLogFromFile = fs.readFileSync(LAST_LOG_PATH, 'utf-8');
+	lastLog = Number(lastLogFromFile);
 }
 
 if (!fs.existsSync(DATA_PATH)) {
@@ -144,6 +141,18 @@ function makeSecUrl(cik, accession) {
 	return `https://www.sec.gov/Archives/edgar/data/${sanitizedCik}/${accession}.txt`;
 }
 
+function makeSaveProgress(logIdToSave) {
+	fs.writeFileSync(LAST_LOG_PATH, logIdToSave);
+	return (ipCacheChanged, secCacheChanged) => {
+		if (ipCacheChanged) {
+			fs.writeFileSync(IP_CACHE_PATH, JSON.stringify(Array.from(ipCache)))
+		}
+		if (secCacheChanged) {
+			fs.writeFileSync(SEC_CACHE_PATH, JSON.stringify(Array.from(secCache)))
+		}
+	}
+}
+
 let currentY = 0;
 function logToOutput(log, xPos, yPos) {
 	const yOffset = yPos - currentY;
@@ -164,7 +173,7 @@ async function sendRequest(url, mode, params) {
 		let data;
 		let response;
 		let retries = 0;
-		while (retries < 10) {
+		while (retries < 5) {
 			let isSuccessful = true;
 			try {
 				response = await fetch(url, {
@@ -399,7 +408,18 @@ function getPercentage(index, total) {
 }
 
 function setupProgress() {
-	const intervalId = setInterval(() => process.stdout.write('.'), 2000);
+	let secondsRunning = 0;
+	let intervalId;
+	intervalId = setInterval(() => {
+		secondsRunning += 2;
+		if (secondsRunning > 60) {
+			// Progress is running for more than 60 seconds. Save progress
+			saveProgress(true, true);
+			process.stdout.write('Algorithm is stuck. Restart algorithm!!!')
+			clearInterval(intervalId);
+		}
+		process.stdout.write('.')
+	}, 2000);
 
 	return intervalId;
 }
@@ -411,7 +431,6 @@ async function processInBatch(
 	name,
 ){
 	let currentIndex = 0;
-	const intervalId = setupProgress();
 
 	async function helper(thisBatch) {
 		const requests = thisBatch.map(p => p());
@@ -420,10 +439,9 @@ async function processInBatch(
 	const arrLen = promiseFnArr.length;
 	if (!arrLen) {
 		logToOutput('No entries', 4, 2);
-
-		clearInterval(intervalId);
 	}
 	for (let i = 0; i < arrLen; i += batchSize) {
+		const intervalId = setupProgress();
 		logToOutput(`${i}/${arrLen} (${getPercentage(i, arrLen)}%)`, 4, 2);
 
 		const thisBatch = promiseFnArr.slice(i, i + batchSize);
@@ -439,8 +457,8 @@ async function processInBatch(
 		if (errArr.length !== 0) {
 			saveErrors(errorStream, name, errArr);
 		}
+		clearInterval(intervalId);
 	}
-	clearInterval(intervalId);
 }
 
 function makeRequestFunction({ ip, accession, cik }) {
@@ -517,20 +535,22 @@ async function main() {
 		globalIpAccessionMap = new Set();
 		ipCacheChanged = false;
 		secCacheChanged = false;
-		if (i < 119) {
+		saveProgress = makeSaveProgress(i);
+
+		if (i < lastLog) {
 			continue;
 		}
 		logToOutput(`Processing #${i} (of ${listLen}): ${list[i].name}`, 0, 0)
 		await processLogFile(list[i]);
 
 		logToOutput('Saving caches', 0, 1)
-		// fs.writeFileSync(GLOBAL_IP_ACCESSION_PATH, JSON.stringify(Array.from(globalIpAccessionMap)))
-		if (ipCacheChanged) {
-			fs.writeFileSync(IP_CACHE_PATH, JSON.stringify(Array.from(ipCache)))
-		}
-		if (secCacheChanged) {
-			fs.writeFileSync(SEC_CACHE_PATH, JSON.stringify(Array.from(secCache)))
-		}
+		saveProgress(ipCacheChanged, secCacheChanged);
+		// if (ipCacheChanged) {
+		// 	fs.writeFileSync(IP_CACHE_PATH, JSON.stringify(Array.from(ipCache)))
+		// }
+		// if (secCacheChanged) {
+		// 	fs.writeFileSync(SEC_CACHE_PATH, JSON.stringify(Array.from(secCache)))
+		// }
 
 	}
 	const after = Date.now();
